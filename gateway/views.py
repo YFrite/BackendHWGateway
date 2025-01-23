@@ -1,39 +1,41 @@
-import json
-
 import requests
-from django.http import JsonResponse, HttpResponse
-from django.shortcuts import redirect
+from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.core import serializers
+from django.views.decorators.http import require_http_methods
+
 
 @csrf_exempt
-def get_and_post(request):
-    if request.method == "GET":
-        return requests.get(" http://192.168.0.105:8001/get_and_post")
-    elif request.method == "POST":
-        return requests.post("http://192.168.0.105:8001/get_and_post")
+@require_http_methods(["GET", "POST", "PUT", "PATCH", "DELETE"])
+def gateway_view(request, path=''):
+    target_url = f'http://192.168.0.105:8001/{path}'
 
-def redirected(request):
-    return requests.get("http://192.168.0.105:8001/redirected")
+    headers = {
+        key: value for key, value in request.headers.items()
+        if key.lower() not in ['host', 'content-length', 'connection']
+    }
 
-def all_users(request):
-    return requests.get("http://192.168.0.105:8001/users")
+    try:
+        response = requests.request(
+            method=request.method,
+            url=target_url,
+            headers=headers,
+            params=request.GET,
+            data=request.body,
+            stream=True
+        )
 
-@csrf_exempt
-def update_user(request, pk):
-    return requests.post(f"http://192.168.0.105:8001/users/update/{pk}", json=request.body)
+        proxy_response = HttpResponse(
+            response.content,
+            status=response.status_code,
+            content_type=response.headers.get('Content-Type')
+        )
 
-def delete_user(request, pk):
-    return requests.get(f"http://192.168.0.105:8001/users/delete/{pk}")
+        excluded_headers = ['connection', 'content-encoding', 'content-length', 'transfer-encoding']
+        for key, value in response.headers.items():
+            if key.lower() not in excluded_headers:
+                proxy_response[key] = value
 
-@csrf_exempt
-def add_user(request):
-    return request.post("http://192.168.0.105:8001/users/add", json=request.body)
+        return proxy_response
 
-@csrf_exempt
-def register(request):
-    return requests.post(f"http://192.168.0.105:8001/register", json=request.body)
-
-@csrf_exempt
-def user_login(request):
-    return requests.post(f"http://192.168.0.105:8001/login", json=request.body)
+    except requests.exceptions.RequestException:
+        return HttpResponse(status=502)
